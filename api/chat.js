@@ -9,28 +9,37 @@ module.exports = async function handler(req, res) {
   try {
     const { messages, system } = req.body;
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(500).json({ error: 'API key not configured' });
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system,
-        messages
-      })
-    });
+    const geminiMessages = messages.map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents: geminiMessages,
+          generationConfig: { maxOutputTokens: 1024 }
+        })
+      }
+    );
 
     const data = await response.json();
-    if (data.error) return res.status(400).json({ error: data.error.message });
-    return res.status(200).json(data);
+
+    if (data.error) {
+      return res.status(400).json({ error: data.error.message });
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+    return res.status(200).json({ content: [{ text }] });
+
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
